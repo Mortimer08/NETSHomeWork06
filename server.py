@@ -3,49 +3,14 @@ import socket
 import threading
 
 
-class ClientsList:
-    def __init__(self):
-        self.counter = 0
-        self.list = []
+class CommandParcer:
+    def get_command(self, message: str):
+        if " " in message:
+            return message.split(" ")[1]
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self.counter < len(self.list):
-            item = self.list[self.counter]
-            self.counter += 1
-            return item
-        else:
-            self.counter = 0
-            raise StopIteration()
-
-    def add_client(self, client):
-        client.my_private_chat = self
-        self.list.append(client)
-
-    def remove_client(self, client):
-        self.list.remove(client)
-
-    def get_client(self, nick):
-        for client in self.list:
-            print(client.get_nickname)
-            if client.get_nickname == nick:
-                return client
-
-
-class PrivateChat:
-    def __init__(self):
-        self.__clients = ClientsList()
-
-    def add_client(self, client):
-        self.__clients.add_client(client)
-        client.in_private_chat = True
-        client.my_private_chat = self
-
-    def send_my_data(self, message):
-        for client in self.__clients:
-            client.send_my_data(message)
+    def get_attr(self, message: str):
+        if message.count(" ") > 1:
+            return message.split(" ")[2]
 
 
 class MyClient:
@@ -56,7 +21,7 @@ class MyClient:
         self.in_private_chat = False
         self.my_private_chat = PrivateChat()
 
-    def set_nickname(self, nickname):
+    def set_nickname(self, nickname: str):
         self.__nickname = nickname
 
     def get_nickname(self):
@@ -79,8 +44,56 @@ class MyClient:
         data = self.__connection.recv(1024).decode('UTF-8')
         return data
 
-    def send_my_data(self, message):
+    def send_my_data(self, message: str):
         self.__connection.send(message.encode('UTF-8'))
+
+
+class ClientsList:
+    def __init__(self):
+        self.counter = 0
+        self.list = []
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.counter < len(self.list):
+            item = self.list[self.counter]
+            self.counter += 1
+            return item
+        else:
+            self.counter = 0
+            raise StopIteration()
+
+    def add_client(self, client: MyClient):
+        self.list.append(client)
+
+    def remove_client(self, client: MyClient):
+        self.list.remove(client)
+
+    def get_client(self, nick: str):
+        for client in self:
+            if client.get_nickname() == nick:
+                return client
+
+
+class PrivateChat:
+    def __init__(self):
+        self.__clients = ClientsList()
+
+    def add_client(self, client: MyClient):
+        self.__clients.add_client(client)
+        client.in_private_chat = True
+        client.my_private_chat = self
+
+    def send_my_data(self, message):
+        for client in self.__clients:
+            client.send_my_data(message)
+
+    def delete_client(self, client: MyClient):
+        self.__clients.remove_client(client)
+        client.in_private_chat = False
+        # client.my_private_chat = None
 
 
 # Connection Data
@@ -92,31 +105,38 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((host, port))
 server.listen()
 clients = ClientsList()
+command_parcer = CommandParcer()
 
 
 # Sending Messages To All Connected Clients
-def broadcast(message):
+def broadcast(message: str):
     for client in clients:
-        client.send_my_data(message)
+        if (not client.in_private_chat):
+            client.send_my_data(message)
 
 
 # Handling Messages From Clients
-def handle(client):
+def handle(client: MyClient):
     while True:
         try:
             # Broadcasting Messages
             message = client.receive()
-            print(message)
-            if message.split(" ")[1] == 'chatwith':
-                opponent_nick = message.split(" ")[2]
+            command = command_parcer.get_command(message)
+            attribute = command_parcer.get_attr(message)
+            if command == 'chatwith':
+                opponent_nick = attribute
                 opponent = clients.get_client(opponent_nick)
-                print(opponent_nick)
-                print(opponent)
                 if opponent != None:
-                    print("{} and {} in private chat".format(client.get_nickname, opponent.get_nickname))
+                    print("{} and {} in private chat".format(client.get_nickname(), opponent.get_nickname()))
                     client.my_private_chat.add_client(client)
+                    opponent.my_private_chat = client.my_private_chat
                     client.my_private_chat.add_client(opponent)
-
+            if command == 'exit':
+                if client.in_private_chat:
+                    client.my_private_chat.send_my_data("{} exit chat".format(client.get_nickname()))
+                    client.my_private_chat.delete_client(client)
+                else:
+                    client.close_connection()
             if client.in_private_chat:
                 client.my_private_chat.send_my_data(message)
             else:
